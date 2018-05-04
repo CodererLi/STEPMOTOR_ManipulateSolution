@@ -103,17 +103,21 @@
 #define  NUM_BYTES_WR_RUN    1
 
 #define  NUM_BYTES_RD_RUN    1
+
+#define  UART_RECEIVE   4
 //-----------------------------------------------------------------------------
 // Global VARIABLES
 //-----------------------------------------------------------------------------
 
 // Global holder for SMBus data
 // All receive data is written here
-unsigned char SMB_DATA_IN[NUM_BYTES_RD];
+unsigned char SMB_DATA_IN_TURN[NUM_BYTES_RD_TURN];
+unsigned char SMB_DATA_IN_RUN[NUM_BYTES_RD_RUN];
 
 // Global holder for SMBus data.
 // All transmit data is read from here
-unsigned char SMB_DATA_OUT[NUM_BYTES_WR];
+unsigned char SMB_DATA_OUT_TURN[NUM_BYTES_WR_TURN];
+unsigned char SMB_DATA_OUT_RUN[NUM_BYTES_WR_RUN];
 
 
 unsigned char TARGET;                  // Target SMBus slave address
@@ -126,13 +130,21 @@ bit SMB_RW;                            // Software flag to indicate the
                                        // direction of the current transfer
 
 unsigned short int TurnStepNumber;
+unsigned char TurnStepNumber_HighByte;
 bit TurnDirection;
 bit RunDirection;
 unsigned char TurnAngle;
-unsigned char TurnStepNumber_HighByte;
+
 bit RX_READY = 0;
 bit START = 0;
 bit VelocitySCALE = 1;
+unsigned char UART_RECEIVE_ARRAY[UART_RECEIVE];
+unsigned char UART_RECEIVE_COUNT = 0;
+unsigned short int CheckTransit;
+unsigned char CheckTransit_LowByte;
+unsigned char TurnAngle;
+unsigned char StateOrder; 
+
 
 unsigned char TurnCounter = 0;
 unsigned char a;
@@ -202,7 +214,7 @@ void MAIN (void)
    LED = 0;
 
    SMBus_Init ();                      // Configure and enable SMBus
-	 UART0_Init ();
+    UART0_Init ();
    Timer3_Init ();                     // Configure and enable Timer3
 
    EIE1 |= 0x02;                       // Enable the SMBus interrupt
@@ -219,6 +231,7 @@ void MAIN (void)
    {  
       while(RX_READY)
       {  
+             RX_READY = 0;
          START = StateOrder >> 3;
          VelocitySCALE = StateOrder >> 2;
          TurnDirection = StateOrder;
@@ -231,24 +244,24 @@ void MAIN (void)
          {   
             if(data_count == 0)
             {
-               SMB_DATA_OUT[data_count] = TurnStepNumber_HighByte;
+               SMB_DATA_OUT_TURN[data_count] = TurnStepNumber_HighByte;
                if(START)
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x80;
+                  SMB_DATA_OUT_TURN[data_count] = SMB_DATA_OUT_TURN[data_count] | 0x80;
                }else
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x00;
+                  SMB_DATA_OUT_TURN[data_count] = SMB_DATA_OUT_TURN[data_count] | 0x00;
                }
                if(TurnDirection)
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x40;
+                  SMB_DATA_OUT_TURN[data_count] = SMB_DATA_OUT_TURN[data_count] | 0x40;
                }else
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x00;
+                  SMB_DATA_OUT_TURN[data_count] = SMB_DATA_OUT_TURN[data_count] | 0x00;
                }
             }else
             {
-               SMB_DATA_OUT[data_count] = (unsigned char) TurnStepNumber;
+               SMB_DATA_OUT_TURN[data_count] = (unsigned char) TurnStepNumber;
             }
          }
 
@@ -258,40 +271,36 @@ void MAIN (void)
 
          for(data_count = 0; data_count < NUM_BYTES_WR_RUN; data_count++)
          {  
-            SMB_DATA_OUT[data_count] = 0;
+            SMB_DATA_OUT_RUN[data_count] = 0;
             if(START)
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x40;
+                  SMB_DATA_OUT_RUN[data_count] = SMB_DATA_OUT_RUN[data_count] | 0x40;
                }else
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x00;
+                  SMB_DATA_OUT_RUN[data_count] = SMB_DATA_OUT_RUN[data_count] | 0x00;
                }
                if(VelocitySCALE)
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x20;
+                  SMB_DATA_OUT_RUN[data_count] = SMB_DATA_OUT_RUN[data_count] | 0x20;
                }else
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x00;
+                  SMB_DATA_OUT_RUN[data_count] = SMB_DATA_OUT_RUN[data_count] | 0x00;
                }
                if(RunDirection)
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x01;
+                  SMB_DATA_OUT_RUN[data_count] = SMB_DATA_OUT_RUN[data_count] | 0x01;
                }else
                {
-                  SMB_DATA_OUT[data_count] = SMB_DATA_OUT[data_count] | 0x00;
+                  SMB_DATA_OUT_RUN[data_count] = SMB_DATA_OUT_RUN[data_count] | 0x00;
                }
          }
          TARGET = SLAVE_RUN_ADDR;
          SMB_Write();                     // Initiate SMBus write
          while(SMB_BUSY);
-         // SMBus Read Sequence
-         //TARGET = SLAVE_ADDR;             // Target the Slave for next SMBus
-                                          // transfer
-         //SMB_Read();
-         LED = ~LED;
+
+         //LED = ~LED;
          T0_Wait_ms (2);
-         // TurnCounter++;
-         //}
+
       }
       
    }
@@ -341,7 +350,7 @@ void SYSCLK_Init (void)
 //
 // P0.0   digital   push-pull    UART TX
 // P0.1   digital   open-drain    UART RX
-// P0.2		digital   open-drain    SMBus SDA
+// P0.2     digital   open-drain    SMBus SDA
 // P0.3   digital   open-drain    SMBus SCL
 // P1.6   digital   push-pull     LED
 //
@@ -530,9 +539,15 @@ void SMBUS_ISR (void) interrupt 7
       //
       // For a WRITE: Send the first data byte to the slave.
       case SMB_MTADDACK:
-
-         SMB0DAT = SMB_DATA_OUT[sent_byte_counter-1];
-         sent_byte_counter++;
+             if(TARGET == SLAVE_TURN_ADDR)
+             {
+                SMB0DAT = SMB_DATA_OUT_TURN[sent_byte_counter-1];
+                sent_byte_counter++;
+             }else
+             {
+                SMB0DAT = SMB_DATA_OUT_RUN[sent_byte_counter-1];
+                sent_byte_counter++;
+         }
 
          break;
 
@@ -548,18 +563,34 @@ void SMBUS_ISR (void) interrupt 7
       // For a WRITE: Send all data.  After the last data byte, send the stop
       //  bit.
       case SMB_MTDBACK:
-
-         if (sent_byte_counter <= NUM_BYTES_WR)
-         {
-            // send data byte
-            SMB0DAT = SMB_DATA_OUT[sent_byte_counter-1];
-            sent_byte_counter++;
-         }
-         else
-         {
-            STO = 1;                   // Set STO to terminate transfer
-            SMB_BUSY = 0;              // And free SMBus interface
-         }
+             if(TARGET == SLAVE_TURN_ADDR)
+             {
+                if (sent_byte_counter <= NUM_BYTES_WR_TURN)
+                {
+                     // send data byte
+                     SMB0DAT = SMB_DATA_OUT_TURN[sent_byte_counter-1];
+                     sent_byte_counter++;
+                }
+                else
+                {
+                     STO = 1;                   // Set STO to terminate transfer
+                     SMB_BUSY = 0;              // And free SMBus interface
+                }
+             }else
+             {
+                if (sent_byte_counter <= NUM_BYTES_WR_RUN)
+                {
+                     // send data byte
+                     SMB0DAT = SMB_DATA_OUT_RUN[sent_byte_counter-1];
+                     sent_byte_counter++;
+                }
+                else
+                {
+                     STO = 1;                   // Set STO to terminate transfer
+                     SMB_BUSY = 0;              // And free SMBus interface
+                }
+               }
+         
 
          break;
 
@@ -577,17 +608,32 @@ void SMBUS_ISR (void) interrupt 7
       //
       // For a WRITE: N/A
       case SMB_MRADDACK:
-
-         if (rec_byte_counter == NUM_BYTES_RD)
-         {
-            AA = 0;                    // Only one byte in this transfer,
-                                       // send NACK after byte is received
-         }
-         else
-         {
-            AA = 1;                    // More than one byte in this transfer,
-                                       // send ACK after byte is received
-         }
+             if(TARGET == SLAVE_TURN_ADDR)
+             {
+                if (rec_byte_counter == NUM_BYTES_RD_TURN)
+                {
+                     AA = 0;                    // Only one byte in this transfer,
+                                                             // send NACK after byte is received
+                }
+                else
+                {
+                     AA = 1;                    // More than one byte in this transfer,
+                                                             // send ACK after byte is received
+                }
+             }else
+             {
+                if (rec_byte_counter == NUM_BYTES_RD_RUN)
+                {
+                     AA = 0;                    // Only one byte in this transfer,
+                                                             // send NACK after byte is received
+                }
+                else
+                {
+                     AA = 1;                    // More than one byte in this transfer,
+                                                             // send ACK after byte is received
+                }
+             }
+         
 
          break;
 
@@ -604,18 +650,34 @@ void SMBUS_ISR (void) interrupt 7
       //
       // For a WRITE: N/A
       case SMB_MRDBACK:
-
-         if (rec_byte_counter < NUM_BYTES_RD)
-         {
-            SMB_DATA_IN[rec_byte_counter-1] = SMB0DAT; // Store received byte
-            AA = 1;                    // Send ACK to indicate byte received
-            rec_byte_counter++;        // Increment the byte counter
-         }
-         else
-         {
-            AA = 0;                    // Send NACK to indicate last byte
-                                       // of this transfer
-         }
+             if(TARGET == SLAVE_TURN_ADDR)
+             {
+                if (rec_byte_counter < NUM_BYTES_RD_TURN)
+                {
+                     SMB_DATA_IN_TURN[rec_byte_counter-1] = SMB0DAT; // Store received byte
+                     AA = 1;                    // Send ACK to indicate byte received
+                     rec_byte_counter++;        // Increment the byte counter
+                }
+                else
+                {
+                     AA = 0;                    // Send NACK to indicate last byte
+                                                             // of this transfer
+                }
+             }else
+             {
+                if (rec_byte_counter < NUM_BYTES_RD_RUN)
+                {
+                     SMB_DATA_IN_RUN[rec_byte_counter-1] = SMB0DAT; // Store received byte
+                     AA = 1;                    // Send ACK to indicate byte received
+                     rec_byte_counter++;        // Increment the byte counter
+                }
+                else
+                {
+                     AA = 0;                    // Send NACK to indicate last byte
+                                                             // of this transfer
+                }
+             }
+         
 
          break;
 
@@ -625,11 +687,19 @@ void SMBUS_ISR (void) interrupt 7
       //
       // For a WRITE: N/A
       case SMB_MRDBNACK:
-
-         SMB_DATA_IN[rec_byte_counter-1] = SMB0DAT; // Store received byte
-         STO = 1;
-         SMB_BUSY = 0;
-         AA = 1;                       // Set AA for next transfer
+             if(TARGET == SLAVE_TURN_ADDR)
+             {
+                SMB_DATA_IN_TURN[rec_byte_counter-1] = SMB0DAT; // Store received byte
+                STO = 1;
+                SMB_BUSY = 0;
+                AA = 1;                      // Set AA for next transfer
+             }else
+             {
+                SMB_DATA_IN_RUN[rec_byte_counter-1] = SMB0DAT; // Store received byte
+                STO = 1;
+                SMB_BUSY = 0;
+                AA = 1;                      // Set AA for next transfer
+             }
 
          break;
 
@@ -675,7 +745,7 @@ void SMBUS_ISR (void) interrupt 7
 
 void UART0_Interrupt (void) interrupt 4
 {
-   SFRPAGE = UART0_PAGE;
+    SFRPAGE = UART0_PAGE;
 
    if (RI0 == 1)
    {  
@@ -699,14 +769,14 @@ void UART0_Interrupt (void) interrupt 4
       }else
       {
          UART_RECEIVE_ARRAY[UART_RECEIVE_COUNT] = SBUF0;
-         CheckTransit = (short int)(UART_RECEIVE_ARRAY[0] + UART_RECEIVE_ARRAY[1] + UART_RECEIVE_ARRAY[2]);
-         CheckTransit_LowByte = CheckTransit;
+         CheckTransit = (unsigned short int)(UART_RECEIVE_ARRAY[0] + UART_RECEIVE_ARRAY[1] + UART_RECEIVE_ARRAY[2]);
+         CheckTransit_LowByte = (unsigned char)CheckTransit;
          if(CheckTransit_LowByte == UART_RECEIVE_ARRAY[UART_RECEIVE_COUNT])
          {
             StateOrder = UART_RECEIVE_ARRAY[1];
             TurnAngle = UART_RECEIVE_ARRAY[2];
             RX_READY = 1;
-              LED = ~LED;
+            LED = ~LED;
          }
          UART_RECEIVE_COUNT = 0;
       }

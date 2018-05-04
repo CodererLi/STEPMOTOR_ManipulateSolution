@@ -99,9 +99,12 @@ unsigned char SMB_DATA_IN[NUM_BYTES_WR];
 unsigned char SMB_DATA_OUT[NUM_BYTES_RD];
 unsigned short int StepCommand;
 bit TurnDirection;
+bit START = 0;
 unsigned short int StepNumber = 0;
+
 //bit LastTurnDirection;
 //unsigned short int LastStepNumber = 0;
+
 bit DATA_READY = 0;                    // Set to '1' by the SMBus ISR
                                        // when a new data byte has been
                                        // received.
@@ -184,7 +187,7 @@ void main (void)
    Port_Init();                        // Initialize Crossbar and GPIO
    Timer1_Init();                      // Configure Timer1 for use
                                        // with SMBus baud rate
-	 Timer2_Init();
+    Timer2_Init();
    Timer3_Init ();                     // Configure Timer3 for use with
                                        // SCL low timeout detect
 
@@ -206,18 +209,24 @@ void main (void)
    while(1)
    {
       while(!DATA_READY);              // New SMBus data received?
-		  //count = 0;
-		  //TR2 = 0;
+
       DATA_READY = 0;
 
       // Copy the data from the input array to the output array
       StepCommand = SMB_DATA_IN[0];      // Store 8-high-bit incoming data
       StepCommand = (StepCommand << 8);  // left offset 8-bit
       StepCommand = StepCommand + SMB_DATA_IN[1];
-      TurnDirection = (StepCommand & 0x8000)>>15;
-      StepNumber = (StepCommand & 0x7FFF);
+      TurnDirection = (StepCommand & 0x4000) >> 14;
+      START = (StepCommand & 0x8000) >> 15;
+      StepNumber = (StepCommand & 0x3FFF);
       //LED = ~LED;
-			TR2 = 1;
+      if(START)
+      {
+         TR2 = 1;
+      }else
+         {
+            TR2 = 0;
+         }
    }
 }
 
@@ -358,7 +367,7 @@ void PORT_Init (void)
 
    //P2MDOUT |= 0x01;                    // Make the LED (P2.0) a push-pull
                                        // output
-	 P1MDOUT = 0xFF;
+    P1MDOUT = 0xFF;
 
    XBR0 = 0x04;                        // Enable SMBus pins
    XBR1 = 0x40;                        // Enable crossbar and weak pull-ups

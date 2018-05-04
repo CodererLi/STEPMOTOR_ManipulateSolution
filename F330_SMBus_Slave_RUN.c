@@ -9,14 +9,14 @@
 // - 1-byte SMBus data holder used for both transmit and receive
 // - Timer1 used as SMBus clock rate (used only for free timeout detection)
 // - Timer3 used by SMBus for SCL low timeout detection
-// - ARBLOST support included					    
+// - ARBLOST support included                 
 // - Pinout:
-//    P0.0 -> SDA (SMBus)												
+//    P0.0 -> SDA (SMBus)                                   
 //    P0.1 -> SCL (SMBus)
 //    P0.2 ->pulse of motor 1 and 2
-//	  P0.3 ->pulse of motor 3 and 4
-//	  P0.4 ->direction of motor 1 and 2
-//	  P0.5 ->direction of motor 3 and 4
+//   P0.3 ->pulse of motor 3 and 4
+//   P0.4 ->direction of motor 1 and 2
+//   P0.5 ->direction of motor 3 and 4
 //
 //    P2.0 -> C2D (debug interface)
 //
@@ -45,7 +45,7 @@
 //-----------------------------------------------------------------------------
 // Global Constants
 //-----------------------------------------------------------------------------
-						    
+                      
 #define  SYSCLK         24500000       // System clock frequency in Hz
 
 #define  SMB_FREQUENCY  10000          // Target SMBus frequency
@@ -75,7 +75,7 @@
 // End status vector definition
 
 
-#define  NUM_BYTES_WR   2              // Number of bytes to write
+#define  NUM_BYTES_WR   1              // Number of bytes to write
                                        // Slave <- Master
 #define  NUM_BYTES_RD   1              // Number of bytes to read
                                        // Slave -> Master
@@ -83,16 +83,16 @@
 //-----------------------------------------------------------------------------
 // 16-bit SFR declarations
 //-----------------------------------------------------------------------------
-sfr16	TMR3RL	=  0x92;			// Timer3 reload registers
-sfr16	TMR3    =  0x94;			// Timer3 counter registers
-sfr16	TMR2RL	=  0xCA;			// Timer2 Reload Register
-sfr16	TMR2 	=  0xCC;			// Timer2 Register
+sfr16 TMR3RL   =  0x92;       // Timer3 reload registers
+sfr16 TMR3    =  0x94;        // Timer3 counter registers
+sfr16 TMR2RL   =  0xCA;       // Timer2 Reload Register
+sfr16 TMR2  =  0xCC;       // Timer2 Register
 
-sbit	LED		=  P2^0;			// LED on port P2.0
-sbit	PUL1	=  P0^2;			//P0.2 ->pulse of motor 1 and 2
-sbit	PUL2	=  P0^3;			//P0.3 ->pulse of motor 3 and 4
-sbit	DIR1	=  P0^4;			//P0.4 ->direction of motor 1 and 2  
-sbit	DIR2	=  P0^5;			//P0.5 ->direction of motor 3 and 4
+sbit  LED      =  P2^0;       // LED on port P2.0
+sbit  PUL1  =  P0^2;       //P0.2 ->pulse of motor 1 and 2
+sbit  PUL2  =  P0^3;       //P0.3 ->pulse of motor 3 and 4
+sbit  DIR1  =  P0^4;       //P0.4 ->direction of motor 1 and 2  
+sbit  DIR2  =  P0^5;       //P0.5 ->direction of motor 3 and 4
 
 //end 16-bit SFR declarations
 
@@ -112,8 +112,10 @@ unsigned char SMB_DATA_IN[NUM_BYTES_WR];
 unsigned char SMB_DATA_OUT[NUM_BYTES_RD];
 
 unsigned short int StepCommand;
-bit TurnDirection;
-unsigned short int StepNumber = 0;
+bit RunDirection;
+//unsigned short int StepNumber = 0;
+bit START = 0;
+bit VelocitySCALE;
 
 bit DATA_READY = 0;                    // Set to '1' by the SMBus ISR
                                        // when a new data byte has been
@@ -209,12 +211,16 @@ void main (void)
 
       // Copy the data from the input array to the output array
       StepCommand = SMB_DATA_IN[0];      // Store 8-high-bit incoming data
-      StepCommand = (StepCommand << 8);  // left offset 8-bit
-      StepCommand = StepCommand + SMB_DATA_IN[1];
-      TurnDirection = (StepCommand & 0x8000)>>15;
-      StepNumber = (StepCommand & 0x7FFF);
-      LED = ~LED;
-      TR2 = 1;
+      START = StepCommand >> 2;
+      VelocitySCALE = StepCommand >> 1;
+      RunDirection = StepCommand;
+      if(START)
+      {
+         TR2 = 1;
+      }else
+      {
+         TR2 = 0;
+      }
    }
 }
 
@@ -490,30 +496,23 @@ void SMBus_ISR (void) interrupt 7
 
 void Timer2_ISR (void) interrupt 5
 {
-      if (count < StepNumber)
-      {
-         if (TurnDirection)
-         {
-            DIR1 = 1;
-            DIR2 = 1;          
-         } else
-         {  
-            DIR1 = 0;
-            DIR2 = 0;
-         }
-				 PUL1 = ~PUL1;
-         PUL2 = ~PUL2;
+   if (RunDirection)
+   {
+      DIR1 = 1;
+      DIR2 = 1;          
+   } else
+   {  
+      DIR1 = 0;
+      DIR2 = 0;
+   }
 
-         count++;
-         
-      }else
-      {
-         count = 0;
-         TR2 = 0;
-      }
+   PUL1 = ~PUL1;
+   PUL2 = ~PUL2;
+
+   //count++;
    
-    TF2H = 0;
- }
+   TF2H = 0;
+}
 
 //-----------------------------------------------------------------------------
 // Timer3 Interrupt Service Routine (ISR)
